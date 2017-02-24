@@ -2,4 +2,4 @@
 
 Access and control your jbmedia Light Manager from Linux based on source from https://code.google.com/p/light-manager-c/ with some enhancments 
 
-For details see https://github.com/curzon01/light-manager-c-ext/wiki
+just addes some lines to https://github.com/curzon01/light-manager-c-ext to fix dimming on Intertechno-Type devices
