@@ -350,7 +350,7 @@ char *str_replace ( const char *string, const char *substr, const char *replacem
 
 
 /** * C++ version 0.4 char* style "itoa":
-	* Written by Lukás Chmela
+	* Written by LukÃ¡s Chmela
 	* Released under GPLv3.
 	*/
 char * itoa(int value, char* result, int base)
@@ -1409,7 +1409,13 @@ int handle_input(char* input, libusb_device_handle* dev_handle, int socket_handl
 													fcmdok = false;
 												}
 												else {
-													cmd = 0x01 * dim_value;
+													if(dim_value != 0) {
+														dim_value = ((dim_value / 16)* 16 + 8);
+													}
+													if(dim_value > 248) {
+													dim_value = 248;
+													}
+												cmd = 0x01 * dim_value;
 												}
 											}
 											if (cmd >= 0) {
