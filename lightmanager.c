@@ -108,20 +108,32 @@
 	2.03.0026
 			- Fixed dimming levels for IKEA Koppla dimmers 'IKR 203'
 
+	2.03.0027
+			- fix compiler warnings
+			- fix InterTechno dim value (issue #7)
+
 */
+
+// prevent warnings for 'strptime'
+#define _GNU_SOURCE
+#define _XOPEN_SOURCE
+#define __USE_XOPEN
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <stdarg.h>
+#include <time.h>
 #include <stdbool.h>
 #include <netdb.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <syslog.h>
 #include <signal.h>
 #include <errno.h>
 #include <pthread.h>
-#include <time.h>
+#include <sys/stat.h>
 #include <libusb-1.0/libusb.h>
 
 
@@ -131,7 +143,7 @@
 
 /* Program name and version */
 #define VERSION				"2.3"
-#define BUILD				"0026"
+#define BUILD				"0027"
 #define PROGNAME			"Linux Lightmanager"
 
 /* Some macros */
@@ -350,7 +362,7 @@ char *str_replace ( const char *string, const char *substr, const char *replacem
 
 
 /** * C++ version 0.4 char* style "itoa":
-	* Written by Lukás Chmela
+	* Written by Luk�s Chmela
 	* Released under GPLv3.
 	*/
 char * itoa(int value, char* result, int base)
@@ -1297,7 +1309,6 @@ int handle_input(char* input, libusb_device_handle* dev_handle, int socket_handl
 										int dim_value = strtol(ptr, NULL, 10);
 											if( *(ptr+strlen(ptr)-1)=='\%' ) {
 												dim_value = (10 * dim_value) / 100;
-												printf("DimValue is :", dim_value);
 											}
 											if (errno != 0 || dim_value < 0 || dim_value > 9) { //if (errno != 0 || dim_value < 0 || dim_value > 10) {
 													cmd = -2;
@@ -1397,18 +1408,19 @@ int handle_input(char* input, libusb_device_handle* dev_handle, int socket_handl
 											}
 											/* dimming case */
 											else {
-												errno = 0;
-												maincmd = 0x05;
-												int dim_value = strtol(ptr, NULL, 10);
-												if( *(ptr+strlen(ptr)-1)=='\%' ) {
-													dim_value = (248 * dim_value) / 100;
-												}
-												if (errno != 0 || dim_value < 0 || dim_value > 248) {
-													cmd = -2;
-													errormsg = seterror("Wrong dim level (must be within 0-248 or 0\%-100\%)");
+ 												errno = 0;
+ 												maincmd = 0x05;
+ 												int dim_value = strtol(ptr, NULL, 10);
+ 												if( *(ptr+strlen(ptr)-1)=='\%' ) {
+ 													dim_value = (248 * dim_value) / 100;
+ 												}
+ 												if (errno != 0 || dim_value < 0 || dim_value > 248) {
+ 													cmd = -2;
+ 													errormsg = seterror("Wrong dim level (must be within 0-248 or 0\%-100\%)");
 													fcmdok = false;
 												}
 												else {
+													cmd = 0x01 * dim_value;
 													if(dim_value != 0) {
 														dim_value = ((dim_value / 16)* 16 + 8);
 													}
@@ -1418,7 +1430,8 @@ int handle_input(char* input, libusb_device_handle* dev_handle, int socket_handl
 												cmd = 0x01 * dim_value;
 												}
 											}
-											if (cmd >= 0) {
+											//till here
+                                        if (cmd >= 0) {
 												usbcmd[0] = 0x05;
 												usbcmd[1] = code * 0x10 + (addr - 1);
 												usbcmd[2] = cmd;
@@ -1797,33 +1810,35 @@ void *tcp_server_handle_client(void *arg)
 {
 	char buf[INPUT_BUFFER_MAXLEN];
 	int buflen;
+	int s;
 	int rc;
 	int wfd;
 
-	debug(LOG_DEBUG, "tcp_server_handle_client() thread started with client_fd = %d", (int)arg);
+	s = (int)((long)arg);
+	debug(LOG_DEBUG, "tcp_server_handle_client() thread started with client_fd = %d", s);
 	while(true) {
 		memset(buf, 0, sizeof(buf));
-		rc = recbuffer((int)arg, buf, sizeof(buf), 0);
+		rc = recbuffer(s, buf, sizeof(buf), 0);
 		if ( rc <= 0 ) {
 			debug(LOG_DEBUG, "tcp_server_handle_client() thread will be end due to rc = %d", rc);
-			tcp_server_handle_client_end(rc, (int)arg);
+			tcp_server_handle_client_end(rc, s);
 			pthread_exit(NULL);
 		}
 		else {
-			rc = handle_input(trim(buf), dev_handle, (int)arg, 0);
+			rc = handle_input(trim(buf), dev_handle, s, 0);
 			if ( rc < 0 ) {
 				if( rc > -3 ) {
-					write_to_client((int)arg, 0, "bye\r\n");
+					write_to_client(s, 0, "bye\r\n");
 				}
-				tcp_server_handle_client_end(rc, (int)arg);
+				tcp_server_handle_client_end(rc, s);
 				pthread_exit(NULL);
 			}
 			else {
-				if( write_to_client((int)arg, 0, ">")<0 ) {
+				if( write_to_client(s, 0, ">")<0 ) {
 					pthread_mutex_lock(&mutex_socks);
-					FD_CLR((int)arg, &socks);      /* remove dead client_fd */
+					FD_CLR(s, &socks);      /* remove dead client_fd */
 					pthread_mutex_unlock(&mutex_socks);
-					close((int)arg);
+					close(s);
 					pthread_exit(NULL);
 				}
 			}
@@ -2034,7 +2049,7 @@ int main(int argc, char * argv[]) {
 						/* we need to created detached threads (PTHREAD_CREATE_DETACHED),
 						   so its thread ID and other resources can be reused as soon as the thread terminates. */
 						pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-						int ret = pthread_create(&thread_id, &attr, tcp_server_handle_client, (void *)client_fd);
+						int ret = pthread_create(&thread_id, &attr, tcp_server_handle_client, (void *)(long)client_fd);
 						debug(LOG_DEBUG, "client thread %sstarted (thread_id=%ul)", ret==0?"":"not ", thread_id);
 						pthread_attr_destroy(&attr);
 					}
